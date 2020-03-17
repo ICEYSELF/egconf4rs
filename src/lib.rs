@@ -24,33 +24,33 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn expect_int(&self) -> Result<(), EGError> {
-        if let Value::Int(_) = self {
-            Ok(())
+    pub fn expect_int(&self) -> Result<i64, EGError> {
+        if let Value::Int(i) = self {
+            Ok(*i)
         } else {
             Err(EGError::StaticBorrow("value is not an integer"))
         }
     }
 
-    pub fn expect_float(&self) -> Result<(), EGError> {
-        if let Value::Float(_) = self {
-            Ok(())
+    pub fn expect_float(&self) -> Result<f64, EGError> {
+        if let Value::Float(f) = self {
+            Ok(*f)
         } else {
             Err(EGError::StaticBorrow("value is not a float number"))
         }
     }
 
-    pub fn expect_str(&self) -> Result<(), EGError> {
-        if let Value::String(_) = self {
-            Ok(())
+    pub fn expect_str(&self) -> Result<&String, EGError> {
+        if let Value::String(s) = self {
+            Ok(s)
         } else {
             Err(EGError::StaticBorrow("value is not a string"))
         }
     }
 
-    pub fn expect_list(&self) -> Result<(), EGError> {
-        if let Value::List(_) = self {
-            Ok(())
+    pub fn expect_list(&self) -> Result<&Vec<Value>, EGError> {
+        if let Value::List(ls) = self {
+            Ok(ls)
         } else {
             Err(EGError::StaticBorrow("value is not a list"))
         }
@@ -170,7 +170,11 @@ impl TreeNode {
                                 children.iter_mut().find(|child| *child.key() == chain[0]) {
                             child.insert_impl(&chain[1..], orig_chain, value)
                         } else {
-                            Err(EGError::Owned(format!("{} does not exist", TreeNode::chain_to_string(chain))))
+                            let mut new_child =
+                                TreeNode::Branch { key: Some(chain[0].to_string()), children: Vec::new() };
+                            assert!(new_child.insert_impl(&chain[1..], orig_chain, value).is_ok());
+                            children.push(new_child);
+                            Ok(())
                         }
                     }
                 }
@@ -189,8 +193,54 @@ impl TreeNode {
 
 #[cfg(test)]
 mod tests {
+    use crate::{TreeNode, Value};
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_insert_and_find() {
+        let mut root_node = TreeNode::Branch{ key: None, children: Vec::new() };
+
+        let chain_a = ["a".to_string()];
+        let chain_b_c = ["b".to_string(), "c".to_string()];
+        let chain_b_d_e = ["b".to_string(), "d".to_string(), "e".to_string()];
+        let chain_b_d_f = ["b".to_string(), "d".to_string(), "f".to_string()];
+
+        assert!(root_node.insert(&chain_a, Value::Int(42)).is_ok());
+        assert!(root_node.insert(&chain_b_c, Value::Float(3.14)).is_ok());
+        assert!(root_node.insert(&chain_b_d_e,
+                                 Value::String("x".to_string())).is_ok());
+        assert!(root_node.insert(&chain_b_d_f,
+                                 Value::String("testing".to_string())).is_ok());
+
+        assert_eq!(root_node.find(&chain_a).unwrap().expect_int().unwrap(), 42);
+        assert_eq!(root_node.find(&chain_b_c).unwrap().expect_float().unwrap(), 3.14);
+        assert_eq!(root_node.find(&chain_b_d_e).unwrap().expect_str().unwrap(), "x");
+        assert_eq!(root_node.find(&chain_b_d_f).unwrap().expect_str().unwrap(), "testing");
+    }
+
+    #[test]
+    fn test_insert_conflict() {
+        let mut root_node = TreeNode::Branch { key: None, children: Vec::new() };
+
+        let ok_chains = [
+            vec!["a".to_string()],
+            vec!["b".to_string(), "c".to_string()],
+            vec!["b".to_string(), "d".to_string(), "e".to_string()],
+            vec!["b".to_string(), "d".to_string(), "f".to_string()]
+        ];
+
+        let err_chains = [
+            vec!["a".to_string()],
+            vec!["a".to_string(), "b".to_string()],
+            vec!["b".to_string(), "d".to_string()],
+            vec!["b".to_string(), "d".to_string(), "f".to_string(), "nmsl".to_string()]
+        ];
+
+        for chain in ok_chains.iter() {
+            root_node.insert(&chain[..], Value::Int(42)).unwrap();
+        }
+
+        for chain in err_chains.iter() {
+            assert!(root_node.insert(&chain[..], Value::Int(42)).is_err());
+        }
     }
 }

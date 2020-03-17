@@ -191,6 +191,87 @@ impl TreeNode {
     }
 }
 
+struct ParseResult(Vec<String>, Value);
+
+struct LineParser<'a> {
+    line: &'a [u8],
+    cur: usize,
+    chain: Vec<String>
+}
+
+impl<'a> LineParser<'a> {
+    fn new(line: &'a [u8]) -> Self {
+        LineParser { line, cur: 0, chain: Vec::new(), }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.cur < self.line.len()
+              && self.line[self.cur].is_ascii_whitespace() {
+            self.cur += 1;
+        }
+    }
+
+    fn parse_id_part(&mut self) -> Result<String, EGError> {
+        let mut buffer = Vec::new();
+        while self.cur < self.line.len()
+              && (self.line[self.cur].is_ascii_alphanumeric()
+                  || [b'-', b'_', b'?', b'!', b'$', b'@']
+                     .iter()
+                     .find(|&&ch| ch == self.line[self.cur])
+                     .is_some()) {
+            buffer.push(self.line[self.cur]);
+            self.cur += 1;
+        }
+        if buffer.len() == 0 {
+            return Err(EGError::StaticBorrow("empty identifier"));
+        }
+        Ok(String::from_utf8_lossy(&buffer[..]).to_string())
+    }
+
+    fn parse_number(&mut self) -> Result<Value, EGError> {
+        debug_assert!(self.line[self.cur].is_ascii_digit());
+
+        let mut buffer = Vec::new();
+        while self.cur < self.line.len() && self.line[self.cur].is_ascii_digit() {
+            buffer.push(self.line[self.cur]);
+            self.cur += 1;
+        }
+
+        if self.cur < self.line.len() && self.line[self.cur] == b'.' {
+            self.cur += 1;
+            let mut buffer2 = Vec::new();
+            while self.cur < self.line.len() && self.line[self.cur].is_ascii_digit() {
+                buffer2.push(self.line[self.cur]);
+                self.cur += 1;
+            }
+            if buffer2.len() == 0 {
+                return Err(EGError::StaticBorrow("no digit after floating point"));
+            }
+            buffer.append(&mut buffer2);
+            Ok(Value::Float(String::from_utf8_lossy(&buffer).parse().unwrap()))
+        } else {
+            Ok(Value::Int(String::from_utf8_lossy(&buffer).parse().unwrap()))
+        }
+    }
+
+    fn parse(mut self) -> Result<ParseResult, EGError> {
+        self.skip_whitespace();
+        let first_part = self.parse_id_part()?;
+        self.chain.push(first_part);
+        while self.cur < self.line.len() {
+            if self.line[self.cur] == b'.' {
+                self.cur += 1;
+                let part = self.parse_id_part()?;
+                self.chain.push(part)
+            } else {
+                break;
+            }
+        }
+
+        unimplemented!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{TreeNode, Value};

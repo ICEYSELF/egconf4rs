@@ -85,7 +85,7 @@ impl Display for Value {
     }
 }
 
-enum TreeNode {
+pub enum TreeNode {
     Leaf { key: String, value: Value },
     Branch { key: Option<String>, children: Vec<TreeNode> },
 }
@@ -102,7 +102,11 @@ impl TreeNode {
         ret
     }
 
-    fn find(&self, chain: &[String]) -> Result<&Value, EGError> {
+    pub fn root_node() -> TreeNode {
+        TreeNode::Branch { key: None, children: Vec::new() }
+    }
+
+    pub fn find(&self, chain: &[String]) -> Result<&Value, EGError> {
         if chain.len() == 0 {
             Err(EGError::StaticBorrow("empty input chain"))
         } else {
@@ -110,7 +114,7 @@ impl TreeNode {
         }
     }
 
-    fn insert(&mut self, chain: &[String], value: Value) -> Result<(), EGError> {
+    pub fn insert(&mut self, chain: &[String], value: Value) -> Result<(), EGError> {
         if chain.len() == 0 {
             Err(EGError::StaticBorrow("empty input chain"))
         } else {
@@ -192,9 +196,9 @@ impl TreeNode {
 }
 
 #[derive(Debug)]
-struct ParseResult(Vec<String>, Value);
+pub struct ParseResult(Vec<String>, Value);
 
-struct LineParser<'a> {
+pub struct LineParser<'a> {
     line: &'a [u8],
     cur: usize,
     chain: Vec<String>
@@ -333,7 +337,7 @@ impl<'a> LineParser<'a> {
         }
     }
 
-    fn parse(mut self) -> Result<ParseResult, EGError> {
+    pub fn parse(mut self) -> Result<ParseResult, EGError> {
         self.skip_whitespace();
         let first_part = self.parse_id_part()?;
         self.chain.push(first_part);
@@ -428,9 +432,13 @@ mod tests {
                 panic!()
             }
             if let Value::List(_) = ls[2] {} else { panic!() }
-            if let Value::Float(324.5) = ls[3] {} else { panic!() }
+            if let Value::Float(f) = ls[3] {
+                if f != 324.5 { panic!() }
+            } else {
+                panic!()
+            }
         } else {
-            panic!("should be a list!")
+            panic!()
         }
     }
 }

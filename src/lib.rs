@@ -191,6 +191,7 @@ impl TreeNode {
     }
 }
 
+#[derive(Debug)]
 struct ParseResult(Vec<String>, Value);
 
 struct LineParser<'a> {
@@ -247,6 +248,7 @@ impl<'a> LineParser<'a> {
             if buffer2.len() == 0 {
                 return Err(EGError::StaticBorrow("no digit after floating point"));
             }
+            buffer.push(b'.');
             buffer.append(&mut buffer2);
             Ok(Value::Float(String::from_utf8_lossy(&buffer).parse().unwrap()))
         } else {
@@ -254,27 +256,109 @@ impl<'a> LineParser<'a> {
         }
     }
 
+    fn parse_string(&mut self) -> Result<Value, EGError> {
+        debug_assert!(self.line[self.cur] == b'"');
+        self.cur += 1;
+        let mut buffer = Vec::new();
+        while self.cur < self.line.len() && self.line[self.cur] != b'"' {
+            if self.line[self.cur] == b'\\' {
+                let peek = self.cur + 1;
+                if peek >= self.line.len() {
+                    return Err(EGError::StaticBorrow("unexpected end of file"))
+                }
+                match self.line[peek] {
+                    b'\\' => buffer.push(b'\\'),
+                    b'"' => buffer.push(b'"'),
+                    b'n' => buffer.push(b'\n'),
+                    _ => return Err(EGError::Owned(format!("incorrect conversion sequence \\{}", self.line[peek])))
+                }
+                self.cur += 2;
+            } else {
+                buffer.push(self.line[self.cur]);
+                self.cur += 1;
+            }
+        }
+
+        if self.cur >= self.line.len() || self.line[self.cur] != b'"' {
+            return Err(EGError::StaticBorrow("unclosed string"))
+        }
+        self.cur += 1;
+
+        Ok(Value::String(String::from_utf8_lossy(&buffer).to_string()))
+    }
+
+    fn parse_list(&mut self) -> Result<Value, EGError> {
+        debug_assert!(self.line[self.cur] == b'[');
+        self.cur += 1;
+        self.skip_whitespace();
+
+        let mut values = Vec::new();
+
+        while self.cur < self.line.len() && self.line[self.cur] != b']' {
+            let value = self.parse_value()?;
+            values.push(value);
+            self.skip_whitespace();
+            if self.cur < self.line.len()
+               && self.line[self.cur] != b','
+               && self.line[self.cur] != b']' {
+                return Err(EGError::StaticBorrow("missing ',' as value separator"))
+            }
+            if self.line[self.cur] == b',' {
+                self.cur += 1;
+            }
+            self.skip_whitespace();
+        }
+
+        if self.cur >= self.line.len() || self.line[self.cur] != b']' {
+            return Err(EGError::StaticBorrow("unclosed list"))
+        }
+        self.cur += 1;
+
+        Ok(Value::List(values))
+    }
+
+    fn parse_value(&mut self) -> Result<Value, EGError> {
+        if self.cur >= self.line.len() {
+            return Err(EGError::StaticBorrow("unexpected end of file"))
+        }
+
+        if self.line[self.cur].is_ascii_digit() {
+            self.parse_number()
+        } else if self.line[self.cur] == b'"' {
+            self.parse_string()
+        } else if self.line[self.cur] == b'[' {
+            self.parse_list()
+        } else {
+            Err(EGError::StaticBorrow("wrong value type"))
+        }
+    }
+
     fn parse(mut self) -> Result<ParseResult, EGError> {
         self.skip_whitespace();
         let first_part = self.parse_id_part()?;
         self.chain.push(first_part);
-        while self.cur < self.line.len() {
-            if self.line[self.cur] == b'.' {
-                self.cur += 1;
-                let part = self.parse_id_part()?;
-                self.chain.push(part)
-            } else {
-                break;
-            }
+        while self.cur < self.line.len() && self.line[self.cur] == b'.'{
+            self.cur += 1;
+            let part = self.parse_id_part()?;
+            self.chain.push(part)
         }
 
-        unimplemented!()
+        self.skip_whitespace();
+        if self.cur >= self.line.len() || self.line[self.cur] != b'=' {
+            return Err(EGError::StaticBorrow("expected '='"))
+        }
+        self.cur += 1;
+
+        self.skip_whitespace();
+        let value = self.parse_value()?;
+
+        Ok(ParseResult(self.chain, value))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{TreeNode, Value};
+    use crate::{TreeNode, Value, LineParser, ParseResult};
 
     #[test]
     fn test_insert_and_find() {
@@ -322,6 +406,31 @@ mod tests {
 
         for chain in err_chains.iter() {
             assert!(root_node.insert(&chain[..], Value::Int(42)).is_err());
+        }
+    }
+
+    #[test]
+    fn test_parse_line() {
+        let result =
+            LineParser::new(b"a.b.c.d = [  101 , \"string\", [\"91\\n\", 91], 324.5]  ").parse();
+        let ParseResult(chain, value) = result.unwrap();
+        assert_eq!(chain.len(), 4);
+        assert_eq!(chain[0], "a");
+        assert_eq!(chain[1], "b");
+        assert_eq!(chain[2], "c");
+        assert_eq!(chain[3], "d");
+
+        if let Value::List(ls) = &value {
+            if let Value::Int(101) = ls[0] {} else { panic!() }
+            if let Value::String(s) = &ls[1] {
+                if s != "string" { panic!() }
+            } else {
+                panic!()
+            }
+            if let Value::List(_) = ls[2] {} else { panic!() }
+            if let Value::Float(324.5) = ls[3] {} else { panic!() }
+        } else {
+            panic!("should be a list!")
         }
     }
 }
